@@ -1,17 +1,18 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { CookieGroup } from '../types';
-import { EllipsisVertical, FolderDown, Layers2, SquareArrowOutUpRight, Trash2 } from 'lucide-react';
+import { EllipsisVertical, FolderDown, Layers2, SquareArrowOutUpRight, Trash2, Pencil } from 'lucide-react';
 
 interface CookieItemProps {
   group: CookieGroup;
   onDelete: (id: string) => void;
   onUse: (group: CookieGroup) => void;
+  onEdit: (group: CookieGroup) => void;
   onCopy: (group: CookieGroup) => void;
   onExport: (group: CookieGroup) => void;
   onDuplicate: (group: CookieGroup) => void;
 }
 
-export default function CookieItem({ group, onDelete, onUse, onCopy, onExport, onDuplicate }: CookieItemProps) {
+export default function CookieItem({ group, onDelete, onUse, onEdit, onCopy, onExport, onDuplicate }: CookieItemProps) {
   const [showPopover, setShowPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +77,9 @@ export default function CookieItem({ group, onDelete, onUse, onCopy, onExport, o
           </button>
           {showPopover && (
             <div className="cm-popover">
+              <button onClick={() => { onEdit(group); setShowPopover(false); }} className="cm-popover-item" title="Edit cookies">
+                <Pencil size={16} /> Edit
+              </button>
               <button onClick={() => { onDuplicate(group); setShowPopover(false); }} className="cm-popover-item" title="Duplicate cookies">
                 <Layers2 size={16} /> Duplicate
               </button>
@@ -85,7 +89,7 @@ export default function CookieItem({ group, onDelete, onUse, onCopy, onExport, o
               <button onClick={() => { onCopy(group); setShowPopover(false); }} className="cm-popover-item" title="Copy cookies">
                 <Layers2 size={16} /> Copy
               </button>
-              <button onClick={() => { onDelete(group.id); setShowPopover(false); }} className="cm-popover-item cm-popover-item-danger" title="Delete cookies">
+              <button onClick={() => { onDelete(group.id!); setShowPopover(false); }} className="cm-popover-item cm-popover-item-danger" title="Delete cookies">
                 <Trash2 size={16} /> Delete
               </button>
             </div>

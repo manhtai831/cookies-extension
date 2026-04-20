@@ -20,6 +20,7 @@ export default function CookieForm({ formData, setFormData, onSave, onCancel, ed
                     type="text"
                     placeholder="Name"
                     value={formData.name}
+                    maxLength={100}
                     onChange={(e) => setFormData({ name: e.target.value })}
                     className="cm-input"
                 />

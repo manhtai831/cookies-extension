@@ -26,7 +26,7 @@ export default function Popup() {
 
   // Helper function to generate UUIDv4
   const generateUUID = (): string => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
       const r = (Math.random() * 16) | 0;
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
       return v.toString(16);
@@ -142,7 +142,6 @@ export default function Popup() {
   };
 
   const saveCookie = async () => {
-    if (!apiKey) return;
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     if (!tab.url) {
       showToast('No active tab found', 'error');
@@ -153,6 +152,16 @@ export default function Popup() {
       const currentUrl = new URL(tab.url);
       const currentDomain = currentUrl.hostname;
       const currentCookies = await browser.cookies.getAll({ url: tab.url });
+      if (currentCookies.length === 0) {
+        showToast('No cookies found for the current tab', 'error');
+        return;
+      }
+      const name = formData.name.trim().slice(0, 100); // enforce max length
+      if (!name) {
+        showToast('Please enter a name for the cookie group', 'error');
+        return;
+      }
+
       const cookiesToSave: CookieData[] = currentCookies.map(c => ({
         name: c.name,
         value: c.value,
@@ -163,35 +172,70 @@ export default function Popup() {
         httpOnly: c.httpOnly,
       }));
 
-      // Create a new cookie group
-      const newGroup: CookieGroup = {
-        id: generateUUID(),
-        name: formData.name,
-        url: currentDomain,
-        cookies: cookiesToSave,
-        synced: false,
-        createdAt: Date.now(),
-      };
+      // Check if editing or creating
+      if (editingCookie) {
+        // Update existing group
+        const updatedGroup: CookieGroup = {
+          ...editingCookie,
+          name: name,
+          cookies: cookiesToSave,
+          synced: false,
+          updatedAt: Date.now(),
+          lastSyncedAt: undefined,
+        };
 
-      // Save to local storage first
-      const existingGroups = await browser.storage.local.get(['cookieGroups']);
-      const allGroups = [...(existingGroups.cookieGroups || []), newGroup];
-      await browser.storage.local.set({ cookieGroups: allGroups });
-      setCookieGroups(allGroups);
-
-      // Try to sync to server
-      try {
-        await getApiClient().post('/cookies', [newGroup]);
-        // Mark as synced
-        const updatedGroups = allGroups.map(g => 
-          g.id === newGroup.id ? { ...g, synced: true, lastSyncedAt: Date.now() } : g
+        const existingGroups = await browser.storage.local.get(['cookieGroups']);
+        const allGroups = (existingGroups.cookieGroups || []).map((g: CookieGroup) =>
+          g.id === editingCookie.id ? updatedGroup : g
         );
-        await browser.storage.local.set({ cookieGroups: updatedGroups });
-        setCookieGroups(updatedGroups);
-        showToast(`Saved and synced ${cookiesToSave.length} cookies`, 'success');
-      } catch (error) {
-        console.error('Failed to sync to server, will retry later:', error);
-        showToast(`Saved ${cookiesToSave.length} cookies locally, will sync later`, 'info');
+        await browser.storage.local.set({ cookieGroups: allGroups });
+        setCookieGroups(allGroups);
+
+        // Try to sync updated group
+        try {
+          await getApiClient().post('/cookies', [updatedGroup]);
+          const syncedGroups = allGroups.map((g: CookieGroup) =>
+            g.id === editingCookie.id ? { ...g, synced: true, lastSyncedAt: Date.now() } : g
+          );
+          await browser.storage.local.set({ cookieGroups: syncedGroups });
+          setCookieGroups(syncedGroups);
+          showToast(`Updated and synced ${cookiesToSave.length} cookies`, 'success');
+        } catch (error) {
+          console.error('Failed to sync updated group:', error);
+          showToast(`Updated ${cookiesToSave.length} cookies locally, will sync later`, 'info');
+        }
+      } else {
+        // Create new group
+        const newGroup: CookieGroup = {
+          id: generateUUID(),
+          name: formData.name,
+          url: currentDomain,
+          cookies: cookiesToSave,
+          synced: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        // Save to local storage first
+        const existingGroups = await browser.storage.local.get(['cookieGroups']);
+        const allGroups = [...(existingGroups.cookieGroups || []), newGroup];
+        await browser.storage.local.set({ cookieGroups: allGroups });
+        setCookieGroups(allGroups);
+
+        // Try to sync to server
+        try {
+          await getApiClient().post('/cookies', [newGroup]);
+          // Mark as synced
+          const updatedGroups = allGroups.map(g =>
+            g.id === newGroup.id ? { ...g, synced: true, lastSyncedAt: Date.now() } : g
+          );
+          await browser.storage.local.set({ cookieGroups: updatedGroups });
+          setCookieGroups(updatedGroups);
+          showToast(`Saved and synced ${cookiesToSave.length} cookies`, 'success');
+        } catch (error) {
+          console.error('Failed to sync to server, will retry later:', error);
+          showToast(`Saved ${cookiesToSave.length} cookies locally, will sync later`, 'info');
+        }
       }
 
       setShowForm(false);
@@ -251,7 +295,9 @@ export default function Popup() {
 
   const exportCookie = (group: CookieGroup) => {
     try {
-      const dataStr = JSON.stringify(group, null, 2);
+      const clone = structuredClone(group)
+      delete clone.id;
+      const dataStr = JSON.stringify(clone, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
       const exportFileDefaultName = `${group.name}_cookies_${new Date().toISOString().slice(0, 10)}.json`;
       const linkElement = document.createElement('a');
@@ -296,6 +342,61 @@ export default function Popup() {
     setShowForm(true);
   };
 
+  const handleEditCookie = (group: CookieGroup) => {
+    setFormData({ name: group.name });
+    setEditingCookie(group);
+    setShowForm(true);
+  };
+
+  const handleImportCookie = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedGroup = JSON.parse(content) as CookieGroup;
+
+        // Generate new ID to avoid conflicts
+        importedGroup.id = generateUUID();
+        importedGroup.synced = false;
+        importedGroup.createdAt = Date.now();
+        importedGroup.updatedAt = Date.now();
+        delete importedGroup.lastSyncedAt;
+
+        // Save to local storage
+        const existingGroups = await browser.storage.local.get(['cookieGroups']);
+        const allGroups = [...(existingGroups.cookieGroups || []), importedGroup];
+        await browser.storage.local.set({ cookieGroups: allGroups });
+        setCookieGroups(allGroups);
+
+        // Try to sync to server
+        try {
+          await getApiClient().post('/cookies', [importedGroup]);
+          const updatedGroups = allGroups.map(g =>
+            g.id === importedGroup.id ? { ...g, synced: true, lastSyncedAt: Date.now() } : g
+          );
+          await browser.storage.local.set({ cookieGroups: updatedGroups });
+          setCookieGroups(updatedGroups);
+          showToast('Cookies imported and synced', 'success');
+        } catch (error) {
+          console.error('Failed to sync imported cookies:', error);
+          showToast('Cookies imported locally, will sync later', 'info');
+        }
+
+        // Reset file input
+        event.target.value = '';
+      } catch (error) {
+        console.error('Error importing cookies:', error);
+        showToast('Invalid cookie file format', 'error');
+        event.target.value = '';
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
   const syncPendingCookies = async () => {
     const existingGroups = await browser.storage.local.get(['cookieGroups']);
     const pendingGroups = (existingGroups.cookieGroups || []).filter((g: CookieGroup) => !g.synced);
@@ -306,7 +407,7 @@ export default function Popup() {
 
     try {
       await getApiClient().post('/cookies', pendingGroups);
-      const updatedGroups = (existingGroups.cookieGroups || []).map((g: CookieGroup) => 
+      const updatedGroups = (existingGroups.cookieGroups || []).map((g: CookieGroup) =>
         pendingGroups.some((pg: CookieGroup) => pg.id === g.id) ? { ...g, synced: true, lastSyncedAt: Date.now() } : g
       );
       await browser.storage.local.set({ cookieGroups: updatedGroups });
@@ -326,8 +427,8 @@ export default function Popup() {
     });
     setEditingCookie(null);
   };
-  console.log('cookieGroups',cookieGroups);
-  
+  console.log('cookieGroups', cookieGroups);
+
 
   const filteredCookieGroups = cookieGroups.filter(group => {
     const lowerSearchTerm = searchTerm.toLowerCase();
@@ -364,6 +465,15 @@ export default function Popup() {
         <h2>Cookies Manager</h2>
         <div className="cm-flex">
           <button onClick={handleNewCookie} className="cm-button">New Cookie</button>
+          <label className="cm-button" style={{ cursor: 'pointer', margin: 0, padding: '8px 16px', display: 'inline-block' }}>
+            Import
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportCookie}
+              style={{ display: 'none' }}
+            />
+          </label>
           <button onClick={() => setCurrentPage('settings')} className="cm-button">Settings</button>
         </div>
         <div className="cm-search">
@@ -378,6 +488,7 @@ export default function Popup() {
         <CookieList
           cookies={filteredCookieGroups}
           onDelete={deleteCookie}
+          onEdit={handleEditCookie}
           onCopy={onCopy}
           onUse={useCookie}
           onExport={exportCookie}

@@ -22,6 +22,7 @@
     "{{firefox}}.scripts": ["src/background.ts"]
   },
   "permissions": [
+    "alarms",
     "cookies",
     "storage",
     "tabs",

@@ -9,12 +9,13 @@ export interface CookieData {
 }
 
 export interface CookieGroup {
-  id: string; // uuid
+  id?: string; // uuid
   name: string; // group name from formData
   url: string; // current tab domain when saved
   cookies: CookieData[];
   synced: boolean;
   createdAt: number;
+  updatedAt: number;
   lastSyncedAt?: number;
 }
 
